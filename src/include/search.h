@@ -23,6 +23,11 @@ enum search_ret {
     SEARCH_EIO = -4 
 };
 
+struct termsrc {
+    struct conjunct *term;
+    struct search_list_src *src;
+};
+
 /* structure to accumulate the weight for a document during ranking */
 struct search_acc {
     unsigned long int docno;
@@ -134,6 +139,8 @@ float search_qweight(struct query *q);
 
 #include "alloc.h"
 #include "index_querybuild.h"
+
+// #include "index_prune.h"
 
 /* function to return a list source for a given term (FIXME: move to a different
  * module) */

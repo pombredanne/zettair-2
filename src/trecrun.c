@@ -1,4 +1,7 @@
 /* trecrun.c is a tool that answers queries in trec topic files and
+
+
+
  * outputs the answers in a format suitable for evaluation by the
  * trec_eval set of scripts
  *
@@ -1030,7 +1033,9 @@ static int process_topic_file(FILE *fp, struct args *args, FILE *output,
                 gettimeofday(&now, NULL);
 
                 if (args->print_queries) {
-                    fprintf(stderr, 
+                    //fprintf(stderr,
+                    // sengor
+                    printf( 
                       "query '%s' completed in %lu microseconds\n", query,
                       (unsigned long int) now.tv_usec - then.tv_usec 
                         + (now.tv_sec - then.tv_sec) * 1000000);

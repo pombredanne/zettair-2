@@ -47,7 +47,7 @@
 #include "_index.h"
 #include "_docmap.h"
 #include "index_querybuild.h"
-
+#include "index_prune.h"
 #include "def.h"
 #include "objalloc.h"
 #include "docmap.h"
@@ -142,7 +142,7 @@ static enum search_ret or_decode(struct index *idx, struct query *query,
     const double terms = ((double) UINT_MAX) * idx->stats.terms_high + idx->stats.terms_low;
 
     float w_t = (float) (terms / ((opt->u.dirichlet.mu) * (query->term[qterm].F_t)));
-
+	printf("weight is = %f\n", w_t);
 
     /* METRIC_PER_CALL */
 
@@ -228,7 +228,7 @@ static enum search_ret and_decode(struct index *idx, struct query *query,
     const double terms = ((double) UINT_MAX) * idx->stats.terms_high + idx->stats.terms_low;
 
     float w_t = (float) (terms / ((opt->u.dirichlet.mu) * (query->term[qterm].F_t)));
-
+	printf("weight is = %f\n", w_t);
 
     /* METRIC_PER_CALL */
 
@@ -343,7 +343,7 @@ static enum search_ret thresh_decode(struct index *idx, struct query *query,
     const double terms = ((double) UINT_MAX) * idx->stats.terms_high + idx->stats.terms_low;
 
     float w_t = (float) (terms / ((opt->u.dirichlet.mu) * (query->term[qterm].F_t)));
-
+	printf("weight is = %f\n", w_t);
 
     /* METRIC_PER_CALL */
 

@@ -38,6 +38,7 @@
 #include "vocab.h"
 #include "zvalgrind.h"
 #include "impact_build.h"
+#include "poolalloc.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -1835,5 +1836,287 @@ int index_commit(struct index *idx,
     }
 
     return ret;
+}
+
+
+///////////////////////////////////////////////////////////////////
+
+void print_files(struct index *idx, struct index_result *result, 
+  unsigned int requested, unsigned int start, unsigned int maxwordlen,
+  int opts, struct index_search_opt *opt){
+	struct alloc list_alloc;
+	unsigned int mem;                /* amount of memory required */
+
+   /* limit memory usage */
+   mem = idx->params.memory;
+
+    /* initialise list allocator */
+    list_alloc.opaque = NULL;
+    if (!(list_alloc.opaque 
+      = poolalloc_new(0, mem + poolalloc_overhead_first(), NULL))) {
+        return 0;
+    }
+    list_alloc.malloc = (alloc_mallocfn) poolalloc_malloc;
+    list_alloc.free = (alloc_freefn) poolalloc_free;
+
+	printf("postings size is %d\n", postings_size(idx->post));
+	printf("index_flags is %d\n", idx->flags);
+	printf("repos is %d\n", idx->repos);
+	printf("vectors is %d\n", idx->vectors);
+	printf("vocabs is %d\n", idx->vocabs);
+	
+	printf("params->parsebuf is %u\n", idx->params.parsebuf);
+	printf("params->tblsize is %u\n", idx->params.tblsize);
+	printf("params->memory is %u\n", idx->params.memory);
+	printf("params->config is %s\n", idx->params.config);
+	printf("param_type is %u\n", idx->param_type);
+	printf("index_type is %u\n", idx->index_type);
+	printf("repos_type is %u\n", idx->repos_type);
+	printf("tmp_type is %u\n", idx->tmp_type);
+	printf("vtmp_type is %u\n", idx->vtmp_type);
+	printf("vocab_type is %u\n", idx->vocab_type);
+	printf("docmap_type is %u\n", idx->docmap_type);
+	printf("param_type is %u\n", idx->param_type);
+
+	printf("impact_stats.avg_f_t is %f\n", idx->impact_stats.avg_f_t);
+	printf("impact_stats.slope is %f\n", idx->impact_stats.slope);
+	printf("impact_stats.quant_bits is %u\n", idx->impact_stats.quant_bits);
+	printf("impact_stats.w_qt_min is %f\n", idx->impact_stats.w_qt_min);
+	printf("impact_stats.w_qt_max is %f\n", idx->impact_stats.w_qt_max);
+
+	printf("stats.avg_f_t is %u\n", idx->stats.avg_length);
+	printf("stats.slope is %f\n", idx->stats.avg_weight);
+	printf("stats.quant_bits is %f\n", idx->stats.terms_high);
+	printf("stats.w_qt_min is %f\n", idx->stats.terms_low);
+	printf("stats.w_qt_max is %f\n", idx->stats.updates);
+
+	
+	print_vocabulary(idx, result, requested, start, maxwordlen, opts, opt);
+	printf("Printing vocabulary \n");
+    print_docmaps(idx, result, requested, start, maxwordlen, opts, opt);
+	printf("Printing index \n");
+	print_index(idx, NULL, list_alloc.opaque, 0, NULL, 0,NULL);
+
+}
+
+// sadiye
+void print_vocabulary(struct index *idx, struct index_result *result, 
+  unsigned int requested, unsigned int start, unsigned int maxwordlen,
+  int opts, struct index_search_opt *opt){
+
+	unsigned int state[3] = {0, 0, 0};
+    void *data;
+    unsigned int datalen,
+                 tmp;
+    struct vocab_vector vv;
+    const char *tmpTerm;
+      // sengor
+	char term[500];
+	
+	FILE *output;
+	unsigned int i = 0;
+	unsigned long int docs,
+		crc;
+
+	output = fopen("vocabulary.txt", "w+");
+
+	fprintf(output, "term = the word itself\n");
+	fprintf(output, "doc_freq = the number of distinct documents term occurs in\n");
+	fprintf(output, "CRC value = log(((double)TOPLAM DOC NO)/doc_freq)+1\n");
+	fprintf(output, "		TERM		DOC_FREQ		CRC VALUE\n");
+
+
+	while ((tmpTerm = iobtree_next_term(idx->vocab, state, &tmp, &data, &datalen))) {
+		unsigned int bytes;
+        unsigned int info;
+        struct vec v;
+        enum vocab_ret vret;				
+		
+		for (i = 0; i < tmp; i++) {
+			term[i] = tmpTerm[i];
+		}
+		while(i < 500){
+			term[i++] = '\0';
+		}
+
+        v.pos = data;
+        v.end = v.pos + datalen;
+
+        while ((vret = vocab_decode(&vv, &v)) == VOCAB_OK) {
+            bytes = vocab_len(&vv);
+            assert(bytes);
+            //stats->vectors += vv.size;
+            info = vec_vbyte_len(vv.header.doc.docs) 
+              + vec_vbyte_len(vv.header.doc.occurs) 
+              + vec_vbyte_len(vv.header.doc.last) + vec_vbyte_len(vv.size);
+            assert(bytes > info);
+
+			docs = vocab_docs(&vv);
+			double ToplamDoc = docmap_entries(idx->map);
+			double crc = log (ToplamDoc/docs) + 1;
+			
+			fprintf(output, "%20s    %10u    %27f\n", term, docs, crc);
+		}
+    }
+}
+/*
+void print_vocabulary(struct index *idx, struct index_result *result, 
+  unsigned int requested, unsigned int start, unsigned int maxwordlen,
+  int opts, struct index_search_opt *opt){
+
+	unsigned int state[3] = {0, 0, 0};
+    void *data;
+    unsigned int datalen,
+                 tmp;
+    struct vocab_vector vv;
+    const char *tmpTerm;
+      // sengor
+	char term[500];
+    unsigned int capacity,
+		fileno;       
+    unsigned long int offset;
+	
+	FILE *output;
+	unsigned int i = 0;
+	unsigned long int docs,
+		occurs,
+		last;
+	
+	output = fopen("vocabulary.txt", "w+");
+
+	fprintf(output, "docs = number of documents term occurs in\n");
+	fprintf(output, "occurs = total number of times term occurrs\n");
+	fprintf(output, "last = last docno in vector\n");
+	fprintf(output, "capacity = how much space is there \n");
+	fprintf(output, "fileno = number of file its in\n");
+	fprintf(output, "offset = offset it's at\n");
+	fprintf(output, "length = returns the length in bytes of a vocab vector\n");
+	fprintf(output, "size = size of stored vector\n");
+	fprintf(output, "                TERM    DOCS    OCCURS    LAST    SIZE    LENGTH    CAPACITY    FILENO     OFFSET\n");     
+
+	while ((tmpTerm = iobtree_next_term(idx->vocab, state, &tmp, &data, &datalen))) {
+		unsigned int bytes;
+        unsigned int info;
+        struct vec v;
+        enum vocab_ret vret;				
+		
+		for (i = 0; i < tmp; i++) {
+			term[i] = tmpTerm[i];
+		}
+		while(i < 500){
+			term[i++] = '\0';
+		}
+
+        v.pos = data;
+        v.end = v.pos + datalen;
+
+        while ((vret = vocab_decode(&vv, &v)) == VOCAB_OK) {
+            bytes = vocab_len(&vv);
+            assert(bytes);
+            //stats->vectors += vv.size;
+            info = vec_vbyte_len(vv.header.doc.docs) 
+              + vec_vbyte_len(vv.header.doc.occurs) 
+              + vec_vbyte_len(vv.header.doc.last) + vec_vbyte_len(vv.size);
+            assert(bytes > info);
+
+			// returns the number of docs from a vocab vector 
+			docs = vocab_docs(&vv);
+			// returns the number of occurences from a vocab vector 
+			occurs = vocab_occurs(&vv);
+			// returns the last docnum from a vocab vector 
+			last = vocab_last(&vv);			
+			fprintf(output, "%20s %7lu %9lu %7lu %7u %9lu %11u %9u %10lu\n", 
+				term, docs, occurs, last, vv.size, bytes, vv.loc.file.capacity, vv.loc.file.fileno, vv.loc.file.offset);
+		}
+    }
+
+}
+*/
+
+void print_docmaps(struct index *idx, struct index_result *result, 
+  unsigned int requested, unsigned int start, unsigned int maxwordlen,
+  int opts, struct index_search_opt *opt){
+	
+
+	FILE *output;
+	unsigned long int i = 0;
+	double avg_distinct_words,
+		avg_bytes,
+		total_bytes,
+		avg_weight,
+		avg_words;
+	unsigned long docs;
+
+	//trecno
+	const unsigned trecno_buf_len = 4096;
+	char trecno_buf[4096+1];
+	unsigned trecno_len;
+	//location
+	enum docmap_flag flags;
+    enum mime_types mtype;
+	unsigned int fileno,
+           bytes;
+           off_t offset;
+	//bytes
+	unsigned int docBytes;
+	//words
+	unsigned int words,
+		distinct_words;
+	//weight
+	double weight;
+
+	char sengor_trec_no[100];
+
+	output = fopen("docmap.txt", "w+");
+
+	fprintf(output, "general docmap structure information\n");
+ 
+	docmap_avg_bytes(idx->map, &avg_bytes);
+	docmap_total_bytes(idx->map, &total_bytes);
+	docmap_avg_weight(idx->map, &avg_weight);
+	docmap_avg_words(idx->map, &avg_words);
+	docmap_avg_distinct_words(idx->map, &avg_distinct_words);
+	docs = docmap_entries(idx->map);
+
+	fprintf(output, "total number of documents : %lu\n", docs);
+	fprintf(output, "average bytes : %f \n", avg_bytes);
+	fprintf(output, "average total bytes : %f \n", total_bytes);
+	fprintf(output, "average weight : %f \n", avg_weight);
+	fprintf(output, "average words : %f \n", avg_words);
+	fprintf(output, "average distinct words : %f \n", avg_distinct_words);
+	fprintf(output, " DOCNO                    TRECNO     LOCATION/MTYPE/FLAGS     BYTES     WORDS     DWORDS     WEIGHT\n");     
+	
+
+
+
+    
+
+
+	for(i = 0; i < docs; i++){
+		if( (docmap_get_trecno(idx->map, i, trecno_buf,  trecno_buf_len, &trecno_len) == DOCMAP_OK) &&
+			(docmap_get_location(idx->map, i, &fileno, &offset, &bytes, &mtype, &flags) == DOCMAP_OK) &&
+			(docmap_get_bytes(idx->map, i, &docBytes) == DOCMAP_OK) &&
+			(docmap_get_words(idx->map, i, &words)  == DOCMAP_OK) &&
+			(docmap_get_distinct_words(idx->map, i, &distinct_words)  == DOCMAP_OK) &&
+			(docmap_get_weight(idx->map, i, &weight)  == DOCMAP_OK)){
+
+			//fprintf(output, "%llu\n",offset); 
+                        //sengor 
+				// SENGOR: CLUEWEB CORRECTION: web adreslerinde acaip karakterler cikiyor, docmap de sorun oluyor.
+				// CLuewebde asagdaki line acilmali
+			   //trecno_buf[26] = '\0';
+
+				trecno_buf[trecno_len] = '\0';
+
+			
+
+			fprintf(output, "%6lu %s %12llu/%5d/%5d %9u %9u %10u %10f \n", i, trecno_buf, 
+				offset, mtype, flags, docBytes, words, distinct_words, weight);
+
+		
+		}
+
+	}
+	
 }
 

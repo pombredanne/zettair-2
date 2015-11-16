@@ -15,10 +15,14 @@
 #include "queryparse.h"
 #include "timings.h"
 #include "index_querybuild.h"
+#include "index_prune.h"
 #include "summarise.h"
 #include "error.h"
 #include "signals.h"
 #include "svnversion.h"
+#include "alloc.h"
+#include "poolalloc.h"
+
 
 #include <assert.h>
 #include <ctype.h>
@@ -28,8 +32,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
-
-/*###*/ int fc = 0; // flush cache before each query
 
 void print_usage(const char *progname, FILE *output, int verbose) {
     const char *name = str_rchr(progname, '/');
@@ -90,6 +92,7 @@ void print_usage(const char *progname, FILE *output, int verbose) {
       "                    (default is light)\n");
     fprintf(output, "    --add: add indexed files to an existing index\n");
     fprintf(output, "    --anh-impact: generate impact-ordered lists\n");
+	fprintf(output, "    -w,--write: write vocabulary, index and map to files\n");
 
     return;
 }
@@ -237,7 +240,8 @@ enum {
     OPT_STEM, OPT_BUILD_STOP, OPT_QUERY_STOP, OPT_ACCUMULATOR_LIMIT, 
     OPT_IGNORE_VERSION,
     OPT_DIRICHLET, OPT_ANH_IMPACT, 
-    OPT_TABLESIZE, OPT_PARSEBUF, OPT_BIG_AND_FAST, OPT_QUERYLIST
+    OPT_TABLESIZE, OPT_PARSEBUF, OPT_BIG_AND_FAST, OPT_QUERYLIST, OPT_PRUNE, OPT_K, OPT_EPS,
+	OPT_WRITE
 };
 
 static struct args *parse_args(unsigned int argc, char **argv, 
@@ -289,7 +293,7 @@ static struct args *parse_args(unsigned int argc, char **argv,
         {"accumulator-limit", 'A', GETLONGOPT_ARG_REQUIRED,
             OPT_ACCUMULATOR_LIMIT},
         {"ignore-version", '\0', GETLONGOPT_ARG_NONE, OPT_IGNORE_VERSION},
-
+		
         /* metrics */
         {"okapi", '\0', GETLONGOPT_ARG_NONE, OPT_OKAPI},
         {"k1", '1', GETLONGOPT_ARG_REQUIRED, OPT_K1},
@@ -309,6 +313,10 @@ static struct args *parse_args(unsigned int argc, char **argv,
         {"dump-vecs", '\0', GETLONGOPT_ARG_REQUIRED, OPT_DUMP_VECS},
         {"max-file-size", '\0', GETLONGOPT_ARG_REQUIRED, OPT_MAXFILESIZE},
         {"file-listsize", '\0', GETLONGOPT_ARG_REQUIRED, OPT_MAXFLIST},
+		{"prune", 'u', GETLONGOPT_ARG_NONE, OPT_PRUNE},
+		{"kappa", 'k', GETLONGOPT_ARG_REQUIRED, OPT_K},
+		{"epsilon", 'e', GETLONGOPT_ARG_REQUIRED,OPT_EPS},
+		{"write", 'w', GETLONGOPT_ARG_NONE, OPT_WRITE}
     };
 
     /* set defaults */
@@ -1063,6 +1071,38 @@ static struct args *parse_args(unsigned int argc, char **argv,
                 err = 1;
             }
             break;
+        case OPT_PRUNE:
+            /* pruning option is selected */
+            args->sopts |= INDEX_PRUNE;
+
+            break;
+        case OPT_K:
+                args->sopt.pr.k = (unsigned int) atoi(arg);
+            break;
+
+        case OPT_EPS:
+
+            dnum = strtod(arg, &tmp);
+            if (!errno && !*tmp) {
+				  args->sopt.pr.eps = (float) dnum;
+			} else {
+			    fprintf(output, "error converting start result value '%s'\n", arg);
+				verbose = 0;
+				err = 1;
+			} 
+            break;
+		case OPT_WRITE:
+			
+			args->sopts |= INDEX_WRITE;
+
+            /* indexing is on */
+			
+			if (argc == 2) {
+                quiet = 1;
+                output = stdout; /* direct to stdout since they requested it */
+                verbose = 0;
+            }
+		break;
 
         default:
             /* shouldn't happen */
@@ -1243,17 +1283,12 @@ int search(struct index *idx, const char *query, struct index_result *result,
     /* check to see whether they have requested a document from the cache */
     if (!is_cache_request(query, maxwordlen, &docno)) {
 
-/*###*/ if (fc) {
-/*###*/     system("echo 3 > /proc/sys/vm/drop_caches");
-/*###*/ }
-
         gettimeofday(&then, NULL);
 
         if (index_search(idx, query, start, requested,
               result, &results, &total_results, &est, opts, opt)) {
 
             gettimeofday(&now, NULL);
-/*###*/     printf("totaltime: %ld\n", (unsigned long int) (now.tv_usec - then.tv_usec + (now.tv_sec - then.tv_sec) * 1000000));
 
             seconds = (double) ((now.tv_sec - then.tv_sec) 
               + (now.tv_usec - (double) then.tv_usec) / 1000000.0);
@@ -1407,6 +1442,12 @@ int build(struct args *args, FILE *output) {
         }
     }
 
+    printf("SENGORs waiting point");
+    getchar();
+
+    printf("still aiting...\n");
+    getchar();
+
     if (args->index && !args->index_add) {
         fprintf(output, "merging...\n");
     } else {
@@ -1495,20 +1536,11 @@ int main(int argc, char **argv) {
     struct timeval now, 
                    then;
 
-    output = stdout; 
-//    if (isatty(STDOUT_FILENO)) {
-//        output = stdout;
-//    } else {
-//        output = stderr;
-//    }
-
-/*###*/FILE *ff = fopen("flush_cache.txt", "r");
-/*###*/if (ff != NULL) {
-/*###*/    fc = 1;
-/*###*/    printf("*** flushing cache before each query ***\n");
-/*###*/} else {
-/*###*/    printf("*** using system cache as normal ***\n");
-/*###*/}
+    if (isatty(STDOUT_FILENO)) {
+        output = stdout;
+    } else {
+        output = stderr;
+    }
 
     if (!getcwd(path, FILENAME_MAX)) {
         fprintf(stderr, "failed to get current working directory\n");
@@ -1521,7 +1553,6 @@ int main(int argc, char **argv) {
             if ((idx = index_load(args->prefix, args->memory, 
                   args->lopts, &args->lopt)) 
               && (results = malloc(sizeof(*results) * args->results))) {
-
                 gettimeofday(&then, NULL);
 
                 /* get word length for this index */
@@ -1530,7 +1561,6 @@ int main(int argc, char **argv) {
                     free_args(args);
                     return EXIT_FAILURE;
                 }
-
                 /* non-interactive mode */
                 for (i = 0; args->list && args->list[i]; i++) {
                     if (!(search(idx, args->list[i], results, args->results,
@@ -1541,33 +1571,58 @@ int main(int argc, char **argv) {
                         return EXIT_FAILURE;
                     }
                 }
+				if (args->sopts & INDEX_PRUNE){
 
-                if (args->qlist != stdin || !args->list || !args->list[0]) {
-                    /* stream-sourced mode */
-                    char querybuf[QUERYBUF + 1];
+					struct alloc list_alloc;
+					unsigned int mem = 100000000;               /* amount of memory required */
+				   /* limit memory usage */
+				   
+				
+					/* initialise list allocator */
+					list_alloc.opaque = NULL;
+					if (!(list_alloc.opaque 
+					  = poolalloc_new(0, mem + poolalloc_overhead_first(), NULL))) {
+						return 0;
+					}
+					list_alloc.malloc = (alloc_mallocfn) poolalloc_malloc;
+					list_alloc.free = (alloc_freefn) poolalloc_free;
 
-                    while (((args->qlist != stdin) 
-                        || (printf("> ") && (fflush(stdout) == 0)))
-                      && fgets(querybuf, QUERYBUF, args->qlist)) {
-                        querybuf[QUERYBUF] = '\0';
-
-                        if (!(search(idx, querybuf, results, args->results, 
+					
+					prune(idx, list_alloc.opaque,0,NULL);
+					exit(0);
+				}
+				else if(args->sopts & INDEX_WRITE){
+					print_files(idx, results, args->results, 
                           args->first_result, stats.maxtermlen, args->sopts, 
-                          &args->sopt))) {
-                            index_delete(idx);
-                            free_args(args);
-                            return EXIT_FAILURE;
-                        }
-                    }
-                }
+                          &args->sopt);
+				}
+                else {
+					if (args->qlist != stdin || !args->list || !args->list[0]) {
+						/* stream-sourced mode */
+						char querybuf[QUERYBUF + 1];
 
-                gettimeofday(&now, NULL);
+						while (((args->qlist != stdin) 
+							|| (printf("> ") && (fflush(stdout) == 0)))
+						  && fgets(querybuf, QUERYBUF, args->qlist)) {
+							querybuf[QUERYBUF] = '\0';
 
-                printf("%lu microseconds querying "
-                  "(excluding loading/unloading)\n", 
-                  (unsigned long int) (now.tv_usec - then.tv_usec 
-                    + (now.tv_sec - then.tv_sec) * 1000000));
+							if (!(search(idx, querybuf, results, args->results, 
+							  args->first_result, stats.maxtermlen, args->sopts, 
+							  &args->sopt))) {
+								index_delete(idx);
+								free_args(args);
+								return EXIT_FAILURE;
+							}
+						}
+					}
 
+					gettimeofday(&now, NULL);
+
+					printf("%lu microseconds querying "
+					  "(excluding loading/unloading)\n", 
+					  (unsigned long int) (now.tv_usec - then.tv_usec 
+						+ (now.tv_sec - then.tv_sec) * 1000000));
+				}
                 index_delete(idx);
                 free(results);
             } else {
@@ -1635,7 +1690,6 @@ int main(int argc, char **argv) {
                     return EXIT_FAILURE;
                 }
             }
-
             /* build or add to a index */
             if (!build(args, output)) {
                 free_args(args);

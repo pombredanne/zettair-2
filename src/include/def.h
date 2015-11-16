@@ -19,14 +19,11 @@
 #endif
 
 /* whether to perform expensive debugging checks (define to 0 to turn off) */
-
-#define NDEBUG 0
-
 #ifdef NDEBUG
 #define DEAR_DEBUG 0
 #else
 #ifndef DEAR_DEBUG
-#define DEAR_DEBUG 1
+#define DEAR_DEBUG 0
 #endif
 #endif
 
@@ -69,22 +66,22 @@
 #undef TIME_BUILD
 
 /* pyramid_width controls number of temporary files during build */
-#define PYRAMID_WIDTH 50
+#define PYRAMID_WIDTH 70
 
 /* default memory constants */
-#define TABLESIZE (1024 * 1024)            /* size of postings hashtable */
-#define DUMP_BUFFER (1024 * 1024)          /* how much to buffer for dumps */
-#define PARSE_BUFFER (1024 * 1024)         /* how much to use for parsing */
-#define MERGE_BUFFER (1024 * 1024)         /* how much to use for merging */
+#define TABLESIZE (100 * 1024 * 1024)            /* size of postings hashtable */
+#define DUMP_BUFFER (100 * 1024 * 1024)          /* how much to buffer for dumps */
+#define PARSE_BUFFER (100 * 1024 * 1024)         /* how much to use for parsing */
+#define MERGE_BUFFER (5000 * 1024 * 1024)         /* how much to use for merging */
 #define ACCUMULATOR_LIMIT (20000)          /* how many document accumulators to 
                                               allow */
-#define MEMORY_DEFAULT (10 * 1024 * 1024)  /* how much memory to consume by 
+#define MEMORY_DEFAULT (10000 * 1024 * 1024)  /* how much memory to consume by 
                                             * default */
 
 /* memory constants for 'big-and-fast' operation */
-#define BIG_TABLESIZE (8 * 1024 * 1024)
-#define BIG_PARSE_BUFFER (10 * 1024 * 1024)
-#define BIG_MEMORY_DEFAULT (200 * 1024 * 1024)
+#define BIG_TABLESIZE (1000 * 1024 * 1024)
+#define BIG_PARSE_BUFFER (1000 * 1024 * 1024)
+#define BIG_MEMORY_DEFAULT (10000 * 1024 * 1024)
 
 /* how big term vectors are initially */
 #define INITVECLEN 8

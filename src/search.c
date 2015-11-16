@@ -31,6 +31,8 @@
 #include "postings.h"
 #include "summarise.h"
 #include "error.h"
+#include "index_prune.h"
+#include "iobtree.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -42,15 +44,6 @@
 
 /* number of significant digits in estimated results */
 #define RESULTS_SIGDIGITS 3
-
-//### proteus
-#define PR_DBG_PRINT 0
-#include <sys/time.h>
-#include <time.h>
-
-
-long int iotime;
-//### proteus
 
 /* functions to return sources from terms and conjuncts */
 struct search_list_src *memsrc_new_fromdisk(struct index *idx, 
@@ -794,10 +787,7 @@ static enum search_ret process_conjunct(struct index *idx,
 #undef READ
 }
 
-struct termsrc {
-    struct conjunct *term;
-    struct search_list_src *src;
-};
+
 
 /* internal function to compare phrase term pointers by frequency/estimated
  * frequency */
@@ -862,7 +852,7 @@ enum search_ret doc_ord_eval(struct index *idx, struct query *query,
     int (*selectivity_cmp)(const void *one, const void *two) = f_t_cmp;
     struct termsrc *srcarr = malloc(sizeof(*srcarr) * query->terms);
     struct index_search_opt spareopt;
-
+	printf("search.c----doc_ord_eval1\n");
     if (!srcarr) {
         return SEARCH_ENOMEM;
     }
@@ -892,7 +882,7 @@ enum search_ret doc_ord_eval(struct index *idx, struct query *query,
         }
         opt->u.dirichlet.mu = 1500;
     }
-
+	printf("search.c----doc_ord_eval2\n");
     if ((ret = sm->pre(idx, query, opts, opt)) != SEARCH_OK) {
         free(srcarr);
         return ret;
@@ -900,6 +890,7 @@ enum search_ret doc_ord_eval(struct index *idx, struct query *query,
 
     /* sort by selectivity */
     qsort(query->term, query->terms, sizeof(*query->term), selectivity_cmp);
+	printf("search.c----doc_ord_eval3\n");
 
     /* see how many will fit simultaneously in the amount of memory we have */
     for (small = 0, memsum = 0; small < query->terms; small++) {
@@ -913,24 +904,29 @@ enum search_ret doc_ord_eval(struct index *idx, struct query *query,
             memsum += query->term[small].term.vocab.size;
         }
     }
+	printf("search.c----doc_ord_eval4\n");
 
     /* initialise the rest of the sources to NULL */
     for (i = small; i < query->terms; i++) {
         srcarr[i].term = NULL;
         srcarr[i].src = NULL;
     }
+	printf("search.c----doc_ord_eval5\n");
 
     /* sort small vectors by disk location */
     qsort(srcarr, small, sizeof(*srcarr), loc_cmp);
 
-/*###*/ struct timeval start, end;
-/*###*/ gettimeofday(&start, NULL);
-
     /* read them all off of disk, in location order.  This speeds disk transfer,
      * by minimising the amount of seeking that needs to be done. */
     for (i = 0; i < small; i++) {
-        void *mem;
 
+//static struct search_list_src *memsrc_new_from_disk(struct index *idx, 
+//  unsigned int type, unsigned int fileno, unsigned long int offset, 
+//  unsigned int size, void *mem);
+
+
+        void *mem;
+		printf("search.c----doc_ord_eval6\n");
         if ((srcarr[i].term->type == CONJUNCT_TYPE_WORD)
           && (srcarr[i].term->term.vocab.location == VOCAB_LOCATION_FILE)
           && (mem 
@@ -948,23 +944,14 @@ enum search_ret doc_ord_eval(struct index *idx, struct query *query,
         }
     }
 
-/*###*/ gettimeofday(&end, NULL);
-/*###*/ printf("readallshort: %ld ", (unsigned long int) (end.tv_usec - start.tv_usec + (end.tv_sec - start.tv_sec) * 1000000));
-
     /* sort by term again */
     qsort(srcarr, small, sizeof(*srcarr), term_cmp);
-
-#if PR_DBG_PRINT
-    printf("\tlist_mem_limit: %d\n", list_mem_limit);
-    printf("\tsmall lists (lists in memory): %d\n", small);
-    for(i=0;i<small;i++) printf("\t\t\"%s\" size: %ld, ft: %d\n", srcarr[i].term->term.term, srcarr[i].term->term.vocab.size, srcarr[i].term->f_t);
-#endif
-
+	printf("search.c----doc_ord_eval7\n");
     /* process terms that have no chance of overflowing the accumulator limit 
      * in OR mode */
     for (i = 0; (i < query->terms) 
         && (results->accs + query->term[i].f_t < results->acc_limit); i++) {
-
+		printf("search.c----doc_ord_eval8\n");
         /* reserve enough accumulators for the entire list */
         if (objalloc_reserve(results->alloc, query->term[i].f_t) 
           < query->term[i].f_t) {
@@ -995,12 +982,13 @@ enum search_ret doc_ord_eval(struct index *idx, struct query *query,
     }
     assert((i == query->terms) 
       || (results->accs + query->term[i].f_t >= results->acc_limit));
-
+	printf("search.c----doc_ord_eval9\n");
     /* process terms that may overflow the accumulator limit in THRESH mode */
     ret = SEARCH_OK;
     for (; (i < query->terms) && (ret == SEARCH_OK); i++) {
         /* don't perform thresholding for a small number of 
          * accumulators... */
+		printf("search.c----doc_ord_eval10\n");
         if ((((results->acc_limit - results->accs) / (float) results->acc_limit)
             < SEARCH_SAMPLES_MIN)
           /* where it's also a small percentage of the list */
@@ -1034,9 +1022,10 @@ enum search_ret doc_ord_eval(struct index *idx, struct query *query,
             }
         }
     }
-
+	printf("search.c----doc_ord_eval11\n");
     /* process terms after accumulator limit has been reached in AND mode */
     for (; i < query->terms; i++) {
+		printf("search.c----doc_ord_eval12\n");
         assert(srcarr[i].term == &query->term[i] || !srcarr[i].term);
         if (((src = srcarr[i].src) 
             || (src 
@@ -1061,7 +1050,7 @@ enum search_ret doc_ord_eval(struct index *idx, struct query *query,
         }
     }
     free(srcarr);
-
+	printf("search.c----doc_ord_eval13\n");
     /* post-process accumulators */
     if (sm->post 
       && (ret = sm->post(idx, query, results->acc, opts, opt)) != SEARCH_OK) {
@@ -1071,6 +1060,7 @@ enum search_ret doc_ord_eval(struct index *idx, struct query *query,
     if (results->estimated) {
         unsigned int lg 
           = (unsigned int) ceil(log10(results->total_results));
+		printf("search.c----doc_ord_eval14\n");
 
         /* remove superfluous significant digits from the estimate */
         if (lg > RESULTS_SIGDIGITS) {
@@ -1168,11 +1158,6 @@ int index_search(struct index *idx, const char *querystr,
         }
     }
 
-/*###*/ printf("\nquery: %s", querystr);
-/*###*/ struct timeval start, end;
-/*###*/ gettimeofday(&start, NULL);
-/*###*/ iotime = 0;
-
     /* construct a query structure */
     query.terms = 0;
     if (!(index_querybuild(idx, &query, querystr, str_len(querystr), 
@@ -1184,10 +1169,6 @@ int index_search(struct index *idx, const char *querystr,
         ERROR1("building query '%s'", querystr);
         return 0;
     }
-
-/*###*/ gettimeofday(&end, NULL);
-/*###*/ printf("\nquerybuild: %ld ", (unsigned long int) (end.tv_usec - start.tv_usec + (end.tv_sec - start.tv_sec) * 1000000));
-/*###*/ iotime += (unsigned long int) (end.tv_usec - start.tv_usec + (end.tv_sec - start.tv_sec) * 1000000);
 
     /* calculate the amount of memory required and create an allocator */
     mem = 0;
@@ -1222,12 +1203,8 @@ int index_search(struct index *idx, const char *querystr,
     /* limit memory usage */
     if (memsum > idx->params.memory) {
         mem = idx->params.memory;
-/*###*/ if (PR_DBG_PRINT)
-/*###*/     printf("\tsome lists fit in memory (total list size: %d, mem limit: %d)\n", memsum, mem);
     } else {
         mem = memsum;
-/*###*/ if (PR_DBG_PRINT)
-/*###*/     printf("\tall lists fit in memory (total list size: %d, mem limit: %d)\n", memsum, mem);
     }
 
     /* initialise list allocator */
@@ -1302,13 +1279,6 @@ int index_search(struct index *idx, const char *querystr,
         results.alloc = acc_alloc;
         ret = doc_ord_eval(idx, &query, list_alloc.opaque, mem, &results, 
             opts, opt);
-
-/*###*/ if (ret != SEARCH_OK) {
-/*###*/     printf("Error in query '%s': doc_ord_eval() return 0\n", querystr);
-/*###*/     exit(0);
-/*###*/ }
-/*###*/ printf("iotime: %ld ", iotime);
-
         accs = results.accs;
         acc = results.acc;
         *total_results = results.total_results; 
@@ -1449,20 +1419,13 @@ static struct search_list_src *memsrc_new_from_disk(struct index *idx,
     int fd = fdset_pin(idx->fd, type, fileno, offset, SEEK_SET);
     ssize_t read_bytes;
 
-/*###*/struct timeval start, end;
-
     if ((fd >= 0) && (pos = mem)) {
-
-        bytes = size;
         do {
-/*###*/ gettimeofday(&start, NULL);
             read_bytes = read(fd, pos, bytes);
-/*###*/ gettimeofday(&end, NULL);
-/*###*/ iotime += (unsigned long int) (end.tv_usec - start.tv_usec + (end.tv_sec - start.tv_sec) * 1000000);
         } while ((read_bytes != -1) 
           && (pos += read_bytes, bytes -= read_bytes));
-        fdset_unpin(idx->fd, type, fileno, fd);
 
+        fdset_unpin(idx->fd, type, fileno, fd);
         if (!bytes) {
             return memsrc_new(mem, size);
         }
@@ -1473,6 +1436,7 @@ static struct search_list_src *memsrc_new_from_disk(struct index *idx,
     }
     return NULL;
 }
+
  
 /* FIXME: structure to allow sourcing of a list from a bucket on disk */
 
@@ -1566,9 +1530,6 @@ static enum search_ret disksrc_read(struct search_list_src *src,
             cap = dsrc->bufcap - dsrc->bufsize;
         }
 
-/*###*/ struct timeval start, end;
-/*###*/ gettimeofday(&start, NULL);
-
         while ((bytes = read(dsrc->fd, dsrc->buf + dsrc->bufsize, cap)) == -1) {
             switch (errno) {
             case EINTR: /* do nothing, try again */ break;
@@ -1576,10 +1537,6 @@ static enum search_ret disksrc_read(struct search_list_src *src,
             default: return SEARCH_EINVAL;
             }
         }
-
-/*###*/ gettimeofday(&end, NULL);
-/*###*/ iotime += (unsigned long int) (end.tv_usec - start.tv_usec + (end.tv_sec - start.tv_sec) * 1000000);
-
         dsrc->bufsize += bytes;
         dsrc->pos += bytes;
 
@@ -1776,3 +1733,885 @@ float search_qweight(struct query *q) {
     return (float) sqrtf(weight);
 }
 
+
+
+
+
+/* macro to atomically read the next docno and f_dt from a vector 
+ * (note: i also tried a more complicated version that tested for a long vec 
+ * and used unchecked reads, but measurements showed no improvement) */
+#define NEXT_DOC(v, docno, f_dt)                                              \
+    (vec_vbyte_read(v, &docno_d)                                              \
+      && (((vec_vbyte_read(v, &f_dt) && ((docno += docno_d + 1), 1))          \
+        /* second read failed, reposition vec back to start of docno_d */     \
+        || (((v)->pos -= vec_vbyte_len(docno_d)), 0))))
+
+/* macro to scan over f_dt offsets from a vector/source */
+#define SCAN_OFFSETS(src, v, f_dt)                                            \
+    do {                                                                      \
+        unsigned int toscan = f_dt,                                           \
+                     scanned;                                                 \
+        enum search_ret sret;                                                 \
+                                                                              \
+        do {                                                                  \
+            if ((scanned = vec_vbyte_scan(v, toscan, &scanned)) == toscan) {  \
+                toscan = 0;                                                   \
+                break;                                                        \
+            } else if (scanned < toscan) {                                    \
+                toscan -= scanned;                                            \
+                /* need to read more */                                       \
+                if ((sret = src->readlist(src, VEC_LEN(v),                    \
+                    (void **) &(v)->pos, &bytes)) == SEARCH_OK) {             \
+                                                                              \
+                    (v)->end = (v)->pos + bytes;                              \
+                } else if (sret == SEARCH_FINISH) {                           \
+                    /* shouldn't end while scanning offsets */                \
+                    return SEARCH_EINVAL;                                     \
+                } else {                                                      \
+                    return sret;                                              \
+                }                                                             \
+            } else {                                                          \
+                assert("can't get here" && 0);                                \
+                return SEARCH_EINVAL;                                         \
+            }                                                                 \
+        } while (toscan);                                                     \
+    } while (0)
+
+
+/* internal function to evaluate a query structure using document ordered
+ * inverted lists and place the results into an accumulator linked list */
+enum prune_ret prune(struct index *idx, 
+  struct poolalloc *list_alloc,
+  int opts, struct index_search_opt *opt) {
+
+	
+
+	unsigned int state[3] = {0, 0, 0};
+    void *data;
+    unsigned int datalen,
+                 tmp;
+    struct vocab_vector vv;
+    const char *tmpTerm;
+	char term[25];
+    unsigned int capacity,
+		fileno;       
+    unsigned long int offset;
+	int ret;
+	FILE *output;
+	unsigned int i = 0;
+	unsigned long int docs,
+		occurs,
+		last;
+	unsigned int scanned;
+	struct termsrc *trm;	
+    const struct search_metric *sm;
+	
+	struct search_acc_cons *acc, **prevptr, **head;
+	struct objalloc *acc_alloc;          /* allocator for accumulators */
+	float w_t;
+	/* variables needed for bucket processing */
+    void *bucketmem = NULL;              /* memory for holding a bucket */
+	int (*selectivity_cmp)(const void *one, const void *two) = f_t_cmp;
+    struct search_list_src *src;
+    struct alloc alloc = {NULL, (alloc_mallocfn) poolalloc_malloc, 
+                          (alloc_freefn) poolalloc_free};
+    struct index_search_opt spareopt;
+
+	const double terms = ((double) UINT_MAX) * idx->stats.terms_high + idx->stats.terms_low;
+	printf("burdayim0\n");
+
+	trm = malloc(sizeof(*term));	
+	trm->term = malloc (sizeof(struct conjunct));
+
+
+
+	printf("acc_alloc before: %u\n", acc_alloc);
+    /* initialise accumulator memory allocator */
+    if (!(acc_alloc 
+      = objalloc_new(sizeof(struct search_acc_cons), 0, 0, 4096, NULL))) {
+        if (bucketmem) {
+            free(bucketmem);
+        }
+        return 0;
+    }
+	printf("acc_alloc after: %u\n", acc_alloc);
+
+
+	output = fopen("vocabulary.txt", "w+");
+
+
+	fprintf(output, "                TERM    DOCS    OCCURS    LAST    SIZE    LENGTH    CAPACITY    FILENO     OFFSET\n");     
+
+
+
+	printf("burdayim1\n");
+    /* choose metric */
+    if (opts & INDEX_SEARCH_DIRICHLET_RANK) {
+        selectivity_cmp = F_t_cmp;
+        sm = dirichlet();
+    } else if (opts & INDEX_SEARCH_OKAPI_RANK) {
+        sm = okapi_k3();
+    } else if (opts & INDEX_SEARCH_PCOSINE_RANK) {
+        sm = pcosine();
+    } else if (opts & INDEX_SEARCH_COSINE_RANK) {
+        sm = cosine();
+    } else if (opts & INDEX_SEARCH_HAWKAPI_RANK) {
+        sm = hawkapi();
+    } else {
+        /* default is dirichlet with mu = 1500.  Fiddle with opt structure to
+         * ensure everything works ok even if people pass a NULL */
+        selectivity_cmp = F_t_cmp;
+        sm = dirichlet();
+        if (!opt) {
+            opt = &spareopt;
+            opts |= INDEX_SEARCH_DIRICHLET_RANK;
+        }
+        opt->u.dirichlet.mu = 1500;
+    }
+
+	printf("burdayim2\n");
+	acc = malloc(sizeof(struct search_acc_cons));
+	prevptr = &acc;
+	head = prevptr;
+	while ((tmpTerm = iobtree_next_term(idx->vocab, state, &tmp, &data, &datalen))) {
+		
+		unsigned int bytes;
+        unsigned int info;
+        struct vec v;
+        enum vocab_ret vret;
+		printf("burdayim3\n");
+		trm->src = NULL;	
+		for (i = 0; i < tmp; i++) {
+			term[i] = tmpTerm[i];
+		}
+		while(i < 25){
+			term[i++] = '\0';
+		}
+
+		printf("term = %s\n", term);
+
+        v.pos = data;
+        v.end = v.pos + datalen;
+
+        while ((vret = vocab_decode(&vv, &v)) == VOCAB_OK) {
+			unsigned long int f_dt,        /* number of offsets for this document */
+				          docno_d;     /* d-gap */
+			unsigned long int docno = SEARCH_DOCNO_START;
+		    int exitwhile = 1;      
+
+			void *mem;
+			void *mem2;
+
+			
+
+			
+			
+			
+			printf("burdayim4\n");
+			trm->term->term.vocab = vv;
+			trm->term->term.next = NULL;
+			trm->term->term.term = NULL;
+			trm->term->term.vecmem = NULL;			
+			trm->src = NULL;
+			trm->term->type = CONJUNCT_TYPE_WORD;
+            trm->term->f_qt = 1;
+            trm->term->f_t = vv.header.docwp.docs;
+            trm->term->F_t = vv.header.docwp.occurs;
+            trm->term->term.next = NULL;
+            trm->term->vecmem = NULL;
+            trm->term->terms = 1;
+            trm->term->sloppiness = 0;
+            trm->term->cutoff = 0;
+
+			printf("trm->term->f_t = %u\n", trm->term->f_t);
+			printf("trm->term->F_t = %u\n", trm->term->F_t);
+
+			printf("burdayim5\n");
+
+			
+        if (
+			
+			(trm->term->type == CONJUNCT_TYPE_WORD)
+          && 
+		  (trm->term->term.vocab.location == VOCAB_LOCATION_FILE)
+          && (mem2 = poolalloc_malloc(list_alloc, trm->term->term.vocab.size))
+          && 
+			(trm->src = memsrc_new_from_disk(idx, idx->index_type, 
+              trm->term->term.vocab.loc.file.fileno, 
+              trm->term->term.vocab.loc.file.offset, 
+              trm->term->term.vocab.size, mem2))
+			  ) {
+            /* succeeded, do nothing */
+			printf("succeded, do nothing \n");
+        } else if ((trm->term->type == CONJUNCT_TYPE_WORD)
+          && (trm->term->term.vocab.location == VOCAB_LOCATION_FILE)) {
+			printf("fail\n");
+            /* failed to allocate or read new source */
+            return SEARCH_ENOMEM;
+        }
+	
+		printf("burdayim55\n");
+        if (objalloc_reserve(acc_alloc, trm->term->f_t) 
+          < trm->term->f_t) {
+            return SEARCH_ENOMEM;
+        }
+		printf("burdayim555\n");
+ 
+		printf("terms = %f\n", terms);
+		w_t = (float) (terms / ((opt->u.dirichlet.mu) * (trm->term->F_t)));
+		printf("WEIGHT IS %f\n", w_t);
+		
+		fprintf(output, "                TERM    DOCS    OCCURS    LAST    SIZE    LENGTH    CAPACITY    FILENO     OFFSET\n");     
+
+			printf("%9lu %11u %9u %10lu\n", 
+				trm->term->term.vocab.size, 
+				trm->term->term.vocab.loc.file.capacity, trm->term->term.vocab.loc.file.fileno, 
+				trm->term->term.vocab.loc.file.offset);
+		
+		
+		
+		
+/*
+
+			bytes = vocab_len(&vv);
+            assert(bytes);
+            //stats->vectors += vv.size;
+            info = vec_vbyte_len(vv.header.doc.docs) 
+              + vec_vbyte_len(vv.header.doc.occurs) 
+              + vec_vbyte_len(vv.header.doc.last) + vec_vbyte_len(vv.size);
+            //stats->vocab_info += vec_vbyte_len(tmp) + tmp + info;
+            assert(bytes > info);
+            //stats->vocab_structure += bytes - info;
+
+			docs = vocab_docs(&vv);
+			occurs = vocab_occurs(&vv);
+			last = vocab_last(&vv);			
+
+	fprintf(output, "                TERM    DOCS    OCCURS    LAST    SIZE    LENGTH    CAPACITY    FILENO     OFFSET\n");     
+
+			fprintf(output, "%20s %7lu %9lu %7lu %7u %9lu %11u %9u %10lu\n", 
+				term, bytes, docs, occurs, last, vv.size, vv.loc.file.capacity, vv.loc.file.fileno, vv.loc.file.offset);
+
+	        
+			fprintf(output, "location = %u\n", vv.location);
+		    if ((vv.location == VOCAB_LOCATION_FILE)
+		      && (mem = poolalloc_malloc(list_alloc, vv.size))
+		      && (trm->src = memsrc_new_from_disk(idx, idx->index_type, 
+		           vv.loc.file.fileno, 
+		          vv.loc.file.offset, 
+		          vv.size, mem))
+				 ) {
+	//	static struct search_list_src *memsrc_new_from_disk(struct index *idx, 
+	//  unsigned int type, unsigned int fileno, unsigned long int offset, 
+	//  unsigned int size, void *mem)
+				//printf("fileno : %u\noffset: %lu\nsize: %u\n", srcarr[i].term->term.vocab.loc.file.fileno,
+				//srcarr[i].term->term.vocab.loc.file.offset, srcarr[i].term->term.vocab.size);
+				printf("mem = %d\n", mem);
+				printf("mem in srcarr = %d\n", ((struct memsrc *) trm->src->opaque)->mem);
+	        } else if ((vv.location == VOCAB_LOCATION_FILE)) {
+
+				
+	         //   free(srcarr);
+			//				   return -1;
+	        }
+
+
+
+		while (exitwhile) {
+			
+			while (NEXT_DOC(&v, docno, f_dt)) {
+				
+				SCAN_OFFSETS(trm->src, &v, f_dt);
+				printf("burdayim6\n");
+				printf("burdayim7\n");
+				while (acc && (docno > acc->acc.docno)) {
+					prevptr = &acc->next;
+					acc = acc->next;
+				}
+
+				if (acc && (docno == acc->acc.docno)) {
+					(acc->acc.weight) += (float) logf(1 + f_dt * w_t);
+
+				} else {
+					struct search_acc_cons *newacc;
+					assert(!acc || docno < acc->acc.docno); 
+					newacc = objalloc_malloc(acc_alloc, sizeof(*newacc));
+					assert(newacc);
+					newacc->next = acc;
+					acc = newacc;
+					acc->acc.docno = docno;
+					acc->acc.weight = 0.0;
+					(acc->acc.weight) += (float) logf(1 + f_dt * w_t);
+
+					*prevptr = newacc;
+				}
+				assert(acc);
+
+				prevptr = &acc->next;
+				acc = acc->next;
+			}
+
+			if ((ret = src->readlist(src, VEC_LEN(&v),
+				(void **) &v.pos, &bytes)) == SEARCH_OK) {
+
+				v.end = v.pos + bytes;
+			} else if (ret == SEARCH_FINISH) {
+				exitwhile = -1;
+				
+				if (!VEC_LEN(&v)) {
+					return SEARCH_OK;
+				} else {
+					return SEARCH_EINVAL;
+				}
+				
+			} else {
+				exitwhile = -1;
+				//return ret;
+			}
+		}
+		printf("burdayim8\n");
+		while(acc->next){
+			
+			printf("accumulator : 	%u, %f\n", acc->acc.docno, acc->acc.weight);	
+		
+		}
+
+
+*/
+
+
+
+/* structure to represent results being passed between evaluation calls */
+//struct search_metric_results {
+//     struct search_acc_cons *acc;     /* list of accumulators */
+ //    unsigned int accs;               /* count of accumulators */
+  //   unsigned int acc_limit;          /* 'soft' accumulator limit */
+    // struct objalloc *alloc;          /* allocator for acc's */
+   //  float v_t;                       /* threshold for accepting accumulators */
+    // int estimated;                   /* whether total_results is estimated */
+    // double total_results;            /* total number of possible results for 
+ //                                      * this query */
+//};
+
+/* linked list of accumulators */
+//struct search_acc_cons {
+ //   struct search_acc_cons *next;
+//    struct search_acc acc;
+//};
+
+/* structure to accumulate the weight for a document during ranking */
+//struct search_acc {
+//    unsigned long int docno;
+//    float weight;
+//};
+
+			
+			
+
+			
+			
+			
+			
+			
+			
+			bytes = vocab_len(&vv);
+            assert(bytes);
+            //stats->vectors += vv.size;
+            info = vec_vbyte_len(vv.header.doc.docs) 
+              + vec_vbyte_len(vv.header.doc.occurs) 
+              + vec_vbyte_len(vv.header.doc.last) + vec_vbyte_len(vv.size);
+            //stats->vocab_info += vec_vbyte_len(tmp) + tmp + info;
+            assert(bytes > info);
+            //stats->vocab_structure += bytes - info;
+
+			docs = vocab_docs(&vv);
+			occurs = vocab_occurs(&vv);
+			last = vocab_last(&vv);			
+
+	fprintf(output, "                TERM    DOCS    OCCURS    LAST    SIZE    LENGTH    CAPACITY    FILENO     OFFSET\n");     
+
+			fprintf(output, "%20s %7lu %9lu %7lu %7u %9lu %11u %9u %10lu\n", 
+				term, bytes, docs, occurs, last, vv.size, vv.loc.file.capacity, vv.loc.file.fileno, vv.loc.file.offset);
+
+	        
+			fprintf(output, "location = %u\n", vv.location);
+		    if ((vv.location == VOCAB_LOCATION_FILE)
+		      && (mem = poolalloc_malloc(list_alloc, vv.size))
+		      && (trm->src = memsrc_new_from_disk(idx, idx->index_type, 
+		           vv.loc.file.fileno, 
+		          vv.loc.file.offset, 
+		          vv.size, mem))
+				 ) {
+	//	static struct search_list_src *memsrc_new_from_disk(struct index *idx, 
+	//  unsigned int type, unsigned int fileno, unsigned long int offset, 
+	//  unsigned int size, void *mem)
+				//printf("fileno : %u\noffset: %lu\nsize: %u\n", srcarr[i].term->term.vocab.loc.file.fileno,
+				//srcarr[i].term->term.vocab.loc.file.offset, srcarr[i].term->term.vocab.size);
+				printf("mem = %d\n", mem);
+				printf("mem in srcarr = %d\n", ((struct memsrc *) trm->src->opaque)->mem);
+	        } else if ((vv.location == VOCAB_LOCATION_FILE)) {
+
+				
+	         //   free(srcarr);
+			//				   return -1;
+	        }
+	    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+			while(exitwhile){
+				while (NEXT_DOC(&v, docno, f_dt)) {
+					
+					SCAN_OFFSETS(trm->src, &v, f_dt);
+					fprintf(output, "scanned = %u\n", scanned);
+					fprintf(output, "<docno = %u,f_dt= %u>, ", docno, f_dt); 
+					while (acc && (docno > acc->acc.docno)) {
+						prevptr = &acc->next;
+						acc = acc->next;
+					}
+
+					if (acc && (docno == acc->acc.docno)) {
+						(acc->acc.weight) += (float) logf(1 + f_dt * w_t);
+
+					} else {
+						struct search_acc_cons *newacc;
+						assert(!acc || docno < acc->acc.docno); 
+						newacc = objalloc_malloc(acc_alloc, sizeof(*newacc));
+						assert(newacc);
+						newacc->next = acc;
+						acc = newacc;
+						acc->acc.docno = docno;
+						acc->acc.weight = 0.0;
+						(acc->acc.weight) += (float) logf(1 + f_dt * w_t);
+
+						*prevptr = newacc;
+					}
+				assert(acc);
+
+				prevptr = &acc->next;
+				acc = acc->next;
+
+				}
+				if ((ret = trm->src->readlist(trm->src, VEC_LEN(&v),
+					(void **) &v.pos, &bytes)) == SEARCH_OK) {
+					//fprintf(output, "bbbbbb\n");
+					v.end = v.pos + bytes;
+				} else if (ret == SEARCH_FINISH) {
+
+					if (!VEC_LEN(&v)) {
+						//fprintf(output, "burdayim1\n");
+						exitwhile = 0;
+					} else {
+						//fprintf(output, "burdayim1\n");
+						exitwhile = 0;
+					}
+				} else {
+					exitwhile = 0;
+				}
+			}
+			acc = *head;
+			while(acc->next){
+			
+				printf("accumulator : 	%u, %f\n", acc->acc.docno, acc->acc.weight);	
+				acc = acc->next;
+			}
+			fprintf(output, "\n");
+			
+		}
+    }
+	return PRUNE_OK;
+}
+
+
+static enum search_ret or_decode2(struct index *idx, struct query *query, 
+  unsigned int qterm, unsigned long int docno, 
+  struct search_metric_results *results, struct search_list_src *src, 
+  int opts, struct index_search_opt *opt) {
+    struct search_acc_cons *acc = results->acc,
+                           **prevptr = &results->acc;
+    unsigned int accs_added = 0;   /* number of accumulators added */
+    unsigned long int f_dt,        /* number of offsets for this document */
+                      docno_d;     /* d-gap */
+    unsigned int bytes;
+    struct vec v = {NULL, NULL};
+    enum search_ret ret;
+    /* METRIC_DECL */
+
+    const double terms = ((double) UINT_MAX) * idx->stats.terms_high + idx->stats.terms_low;
+
+    float w_t = (float) (terms / ((opt->u.dirichlet.mu) * (query->term[qterm].F_t)));
+	printf("weight is = %f\n", w_t);
+
+    /* METRIC_PER_CALL */
+
+
+    while (1) {
+        while (NEXT_DOC(&v, docno, f_dt)) {
+            SCAN_OFFSETS(src, &v, f_dt);
+
+            /* merge into accumulator list */
+            while (acc && (docno > acc->acc.docno)) {
+                prevptr = &acc->next;
+                acc = acc->next;
+            }
+
+            if (acc && (docno == acc->acc.docno)) {
+                /* METRIC_PER_DOC */
+                (acc->acc.weight) += (float) logf(1 + f_dt * w_t);
+
+            } else {
+                struct search_acc_cons *newacc;
+                assert(!acc || docno < acc->acc.docno); 
+
+                /* allocate a new accumulator (we have reserved allocators
+                 * earlier, so this should never fail) */
+                newacc = objalloc_malloc(results->alloc, sizeof(*newacc));
+                assert(newacc);
+                newacc->next = acc;
+                acc = newacc;
+                acc->acc.docno = docno;
+                acc->acc.weight = 0.0;
+                /* METRIC_PER_DOC */
+                (acc->acc.weight) += (float) logf(1 + f_dt * w_t);
+
+                *prevptr = newacc;
+                accs_added++;
+            }
+            assert(acc);
+
+            /* go to next accumulator */
+            prevptr = &acc->next;
+            acc = acc->next;
+        }
+
+        /* need to read more data, preserving bytes that we already have */
+        if ((ret = src->readlist(src, VEC_LEN(&v),
+            (void **) &v.pos, &bytes)) == SEARCH_OK) {
+
+            v.end = v.pos + bytes;
+        } else if (ret == SEARCH_FINISH) {
+            /* finished, update number of accumulators */
+            results->accs += accs_added;
+            results->total_results += accs_added;
+            if (!VEC_LEN(&v)) {
+                return SEARCH_OK;
+            } else {
+                return SEARCH_EINVAL;
+            }
+        } else {
+            return ret;
+        }
+    }
+}
+
+/*int print_index(struct index *idx, struct query *query,
+  struct poolalloc *list_alloc, unsigned int list_mem_limit,
+  struct search_metric_results *results,
+  int opts, struct index_search_opt *opt){
+	unsigned int state[3] = {0, 0, 0};
+    void *data;
+    unsigned int datalen,
+    tmp;
+    struct vocab_vector vv;
+	const char *tmpTerm;
+        //sengor
+	char term[500];
+	unsigned int capacity, fileno;       
+        unsigned long int offset;
+	unsigned int scanned;
+	FILE *output;
+	unsigned int i = 0;
+	unsigned long int docs,occurs,last;
+	struct search_list_src *src;
+	output = fopen("index.txt", "w+");
+	printf("inside print_index\n");
+	fflush(0);
+	while ((tmpTerm = iobtree_next_term(idx->vocab, state, &tmp, &data, &datalen))) {
+		unsigned int bytes;
+		unsigned int info;
+		struct vec v;
+		enum vocab_ret vret;				
+		enum search_ret ret;
+		for (i = 0; i < tmp; i++) {
+			term[i] = tmpTerm[i];
+		}
+		while(i < 500){
+			term[i++] = '\0';
+		}
+		v.pos = data;
+		v.end = v.pos + datalen;
+                
+
+
+		while ((vret = vocab_decode(&vv, &v)) == VOCAB_OK) {
+			unsigned long int f_dt,        // number of offsets for this document
+				              docno_d;     // d-gap 
+			unsigned long int docno = SEARCH_DOCNO_START;		          
+			void *mem;
+			int exitwhile = 1;
+			bytes = vocab_len(&vv);
+			assert(bytes);
+			//stats->vectors += vv.size;
+			info = vec_vbyte_len(vv.header.doc.docs) 
+				   + vec_vbyte_len(vv.header.doc.occurs) 
+				   + vec_vbyte_len(vv.header.doc.last) + vec_vbyte_len(vv.size);
+			assert(bytes > info);
+			// returns the number of docs from a vocab vector 
+			docs = vocab_docs(&vv);
+			// returns the number of occurences from a vocab vector 
+			occurs = vocab_occurs(&vv);
+			// returns the last docnum from a vocab vector 
+			last = vocab_last(&vv);			
+			//fprintf(output, "Term ID: %s occurs: %7lu\n", term, occurs);
+			//fprintf(output, "location = %u\n", vv.location);
+		    	if ((vv.location == VOCAB_LOCATION_FILE)
+		      	       && (mem = poolalloc_malloc(list_alloc, vv.size))
+		      	       && (src = memsrc_new_from_disk(idx, idx->index_type, 
+				          vv.loc.file.fileno, vv.loc.file.offset, vv.size, mem))) {	
+	          		///////////ata////////////
+        	       		//poolalloc_free(list_alloc, mem);	
+			   	/////////////////////////
+	        	} else if ((vv.location == VOCAB_LOCATION_FILE)) {
+					return -1;
+	        	}
+
+
+			while(exitwhile){
+					while (NEXT_DOC(&v, docno, f_dt)) {
+						SCAN_OFFSETS(src, &v, f_dt);
+						//fprintf(output, "scanned = %u\n", scanned);
+						//fprintf(output, "<docno = %u,f_dt= %u>, ", docno, f_dt); 
+					}
+					if ((ret = src->readlist(src, VEC_LEN(&v),
+											 (void **) &v.pos, &bytes)) == SEARCH_OK) {
+						v.end = v.pos + bytes;
+					} else if (ret == SEARCH_FINISH) {
+						if (!VEC_LEN(&v)) {
+							exitwhile = 0;
+						} else {
+							exitwhile = 0;
+						}
+					} else {
+						exitwhile = 0;
+					}
+				}
+				//fprintf(output, "\n");
+		src->delet(src);
+		//free(src);
+		poolalloc_clear(list_alloc);
+		}
+	}
+	fclose(output);
+}
+*/
+int print_index(struct index *idx, struct query *query,
+  struct poolalloc *list_alloc, unsigned int list_mem_limit,
+  struct search_metric_results *results,
+  int opts, struct index_search_opt *opt){
+	unsigned int state[3] = {0, 0, 0};
+    void *data;
+    unsigned int datalen,
+    tmp;
+    struct vocab_vector vv;
+	const char *tmpTerm;
+        //sengor
+	char term[500];
+	unsigned int capacity, fileno;       
+        unsigned long int offset;
+	unsigned int scanned;
+	FILE *output,  *voc_file, *txt_index;
+	unsigned int i = 0;
+	unsigned long int docs,occurs,last;
+	struct search_list_src *src;
+
+
+	//sadiye - sengor - july 2008
+
+	typedef struct inv_ent {
+        int doc_id;
+        int freq;
+        } InvEntry;
+	
+	InvEntry *postings;
+
+    unsigned long total_no_of_docs;
+	int postings_per_term;
+	double CFC;
+	double *doc_lengths;
+	double term_weight;
+
+	long  int total_posting_no = 0;
+
+	int debug_count = 0;
+
+	printf("inside print_index\n");
+	
+	total_no_of_docs = docmap_entries(idx->map);
+
+	printf("here, I found %lu\n", total_no_of_docs);
+
+	postings = (InvEntry*) malloc(sizeof(InvEntry)* total_no_of_docs);
+
+	doc_lengths = (double *) malloc(sizeof(double) * (total_no_of_docs+1));
+
+	// initialize doc_lengths
+	printf("total_no_of_docs is %lu\n", total_no_of_docs); //sadiye
+	for (i=0; i<total_no_of_docs; i++)
+		doc_lengths[i] = 0;
+
+	output = fopen("index_bin.txt", "wb");
+	txt_index = fopen("index.txt", "w+"); //sadiye
+
+	voc_file = fopen("wordlist.txt", "wt");
+
+	while ((tmpTerm = iobtree_next_term(idx->vocab, state, &tmp, &data, &datalen))) {
+		unsigned int bytes;
+		unsigned int info;
+		struct vec v;
+		enum vocab_ret vret;				
+		enum search_ret ret;
+
+		debug_count++;
+
+		if (strlen(tmpTerm) ==0)
+		{	printf("burdaa\n");
+		//	exit(1);
+		}
+
+		for (i = 0; i < tmp; i++) {
+			term[i] = tmpTerm[i];
+		}
+		while(i < 500){
+			term[i++] = '\0';
+		}
+
+	if (strlen(term) ==0)
+		{	printf("burdaa2: %s %d\n", term, debug_count);
+		//	exit(1);
+		continue;
+		}
+
+
+		v.pos = data;
+		v.end = v.pos + datalen;
+                
+		postings_per_term = 0;
+
+		while ((vret = vocab_decode(&vv, &v)) == VOCAB_OK) {
+			unsigned long int f_dt,        // number of offsets for this document
+				              docno_d;     // d-gap 
+			unsigned long int docno = SEARCH_DOCNO_START;		          
+			void *mem;
+			int exitwhile = 1;
+			bytes = vocab_len(&vv);
+			assert(bytes);
+			//stats->vectors += vv.size;
+			info = vec_vbyte_len(vv.header.doc.docs) 
+				   + vec_vbyte_len(vv.header.doc.occurs) 
+				   + vec_vbyte_len(vv.header.doc.last) + vec_vbyte_len(vv.size);
+			assert(bytes > info);
+			// returns the number of docs from a vocab vector 
+			docs = vocab_docs(&vv);
+			// returns the number of occurences from a vocab vector 
+			occurs = vocab_occurs(&vv);
+			// returns the last docnum from a vocab vector 
+			last = vocab_last(&vv);	
+
+			//fprintf(txt_index, "Term ID: %s occurs: %7lu\n", term, occurs); //
+			//fprintf(txt_index, "location = %u\n", vv.location); //
+
+			CFC = log (total_no_of_docs/(double)docs) + 1;
+			fprintf(voc_file, "%s %d %lf\n", term, docs, CFC);
+
+			if ((vv.location == VOCAB_LOCATION_FILE)
+		           && (mem = poolalloc_malloc(list_alloc, vv.size))
+		           && (src = memsrc_new_from_disk(idx, idx->index_type, 
+			       vv.loc.file.fileno, vv.loc.file.offset, vv.size, mem))) {	
+	        
+	        } 
+			else if ((vv.location == VOCAB_LOCATION_FILE)) {
+				return -1;
+			}
+
+			while(exitwhile){
+				while (NEXT_DOC(&v, docno, f_dt)) {
+					SCAN_OFFSETS(src, &v, f_dt);
+					//fprintf(txt_index, "scanned = %u\n", scanned); //
+					//fprintf(txt_index, "<docno = %u,f_dt= %u>, ", docno+1, f_dt);  //
+
+					  postings[postings_per_term].doc_id = ((int)docno)+1;
+					    postings[postings_per_term].freq = (int)f_dt;
+
+				          if (postings[postings_per_term].doc_id <0 || postings[postings_per_term].doc_id > total_no_of_docs || postings[postings_per_term].freq ==0)
+					    printf("??!!! %s %d %lu %lu \n", term, postings_per_term, postings[postings_per_term].doc_id, postings[postings_per_term].freq );
+
+					postings_per_term++;
+
+					// add this term weight to the doc_length array for this document
+					term_weight = f_dt * CFC;
+					doc_lengths[docno] += term_weight * term_weight;
+				}
+				if ((ret = src->readlist(src, VEC_LEN(&v),
+					(void **) &v.pos, &bytes)) == SEARCH_OK) {
+						v.end = v.pos + bytes;
+				} else if (ret == SEARCH_FINISH) {
+				if (!VEC_LEN(&v)) {
+					exitwhile = 0;
+				} else {
+					exitwhile = 0;
+				}
+				} else {
+					exitwhile = 0;
+				}
+				}
+				//fprintf(txt_index, "\n");
+		src->delet(src);
+		//free(src);
+		poolalloc_clear(list_alloc);
+
+		// sengor: write postings to the binary file
+		fwrite(postings, sizeof(InvEntry), postings_per_term , output);
+		fflush(output);	
+		
+		if (postings_per_term != docs)
+		{
+			printf("nooluyo: %s %d %d\n", term, docs, postings_per_term);
+
+		}
+
+		total_posting_no += postings_per_term;
+		}
+	}
+	fclose(output);
+
+	output = fopen("doc_lengths.txt", "wt");
+	
+	// initialize doc_lengths
+	for (i=0; i<total_no_of_docs; i++)
+		 fprintf(output, "%d %lf\n", i+1, sqrt(doc_lengths[i]));
+
+	fclose(output);
+
+	  printf("AL %ld\n", total_posting_no);
+
+	  fclose(txt_index);
+
+}

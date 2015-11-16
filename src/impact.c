@@ -24,6 +24,7 @@
 #include "vec.h"
 #include "vocab.h"
 #include "index_querybuild.h"
+#include "index_prune.h"
 
 struct disksrc {
     struct search_list_src src;      /* parent source structure */

@@ -2019,6 +2019,7 @@ const char *iobtree_next_term(struct iobtree *btree,
         /* traverse down the internal nodes */
         if (traverse(btree, "", 0, btree->root, &curr, NULL) 
           != IOBTREE_OK) {
+			  printf("here1\n");
             return NULL;
         }
 
@@ -2036,6 +2037,7 @@ const char *iobtree_next_term(struct iobtree *btree,
             && read_page(btree, state[0], state[1], btree->leaf, NULL, NULL))) {
             curr = btree->leaf;
         } else {
+			printf("here2\n");
             return NULL;
         }
     }
@@ -2054,6 +2056,7 @@ const char *iobtree_next_term(struct iobtree *btree,
 
         if ((state[0] == curr->h.fileno) && (state[1] == curr->h.offset)) {
             /* self pointer indicates the end of the btree */
+			printf("here3\n");
             return NULL;
         }
 
@@ -2066,6 +2069,7 @@ const char *iobtree_next_term(struct iobtree *btree,
           && read_page(btree, state[0], state[1], curr, NULL, NULL)) {
             state[2] = 0;
         } else {
+			printf("here4\n");
             return NULL;
         }
     }

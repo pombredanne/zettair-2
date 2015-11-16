@@ -35,10 +35,6 @@ static pthread_mutex_t vocab_mutex = PTHREAD_MUTEX_INITIALIZER;
 /* maximum length of an in-vocab vector. */
 #define MAX_VOCAB_VECTOR_LEN 4096
 
-/*###*/ 
-#define PR_DBG_PRINT 1
-/*###*/
-
 /**
  *  Non-synchronized version of get_vocab_vector, i.e. we
  *  assume that, in a multi-threaded environment, the caller
@@ -352,6 +348,8 @@ unsigned int index_querybuild(struct index *idx, struct query *query,
 
     query->terms = 0;
 
+	printf("SENGOR: ");
+
     /* This bit of code builds a structure that represents a query from an
      * array, where the array of words will be filled from 0 upwards, and
      * conjunctions that require a linked list of words (phrase, AND) take
@@ -407,27 +405,16 @@ unsigned int index_querybuild(struct index *idx, struct query *query,
             /* look up word in vocab */
             /* FIXME: word needs to be looked up in in-memory postings as 
              * well */
+				
+			
             if (stem) {
                 word[wordlen] = '\0';
                 stem(idx->stem, word);
                 wordlen = str_len(word);
+				printf(" %s ", word);
             }
             retval = get_vocab_vector(idx->vocab, &entry, word, wordlen,
               vec_buf, sizeof(vec_buf), impacts);
-
-/*###*/if (PR_DBG_PRINT==1) {
-/*###*/    int j;
-/*###*/    printf("\"");
-/*###*/    for (j = 0; j < wordlen; j++) 
-/*###*/        printf("%c", word[j]); 
-/*###*/    printf("\"\t\t");
-/*###*/    if (retval) {
-/*###*/        printf("%ld %ld %ld %ld\n", entry.header.doc.docs, entry.header.doc.occurs, entry.header.doc.last, entry.size);
-/*###*/    } else {
-/*###*/        printf("NOT FOUND\n");
-/*###*/    }
-/*###*/}
-
             if (retval < 0) {
                 return 0;
             } else if (retval == 0) {
@@ -628,6 +615,8 @@ unsigned int index_querybuild(struct index *idx, struct query *query,
       && (query->terms < maxterms));  /* FIXME: temporary stopping condition */
 
     queryparse_delete(qp);
+
+	printf("\n");
     /* returning word count confuses errors with empty queries. */
     /* return words; */
     return 1;

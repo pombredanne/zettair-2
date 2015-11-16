@@ -247,7 +247,11 @@ enum index_search_opts {
      * default ACCUMULATOR_LIMIT adjusted to a minimum of 1%.  Note that
      * if you explicitly set the accumulator limit, then _no_ adjustment
      * is made for either collection size or number of results requested. */
-    INDEX_SEARCH_ACCUMULATOR_LIMIT = (1 << 9)
+    INDEX_SEARCH_ACCUMULATOR_LIMIT = (1 << 9),
+
+	INDEX_PRUNE = (1 << 3),
+
+	INDEX_WRITE = (1 << 4)
 };
 
 /* FIXME: comment me */
@@ -272,6 +276,11 @@ struct index_search_opt {
             float k3;
         } hawkapi;
     } u;
+
+    struct {
+		unsigned int k;
+		float eps;
+    } pr;
 
     unsigned int word_limit;
     unsigned int accumulator_limit;
@@ -369,6 +378,26 @@ int index_add(struct index *idx, const char *file, const char *mimetype,
 int index_commit(struct index *idx, unsigned int opts, 
   struct index_commit_opt *opt,
   unsigned int addopts, struct index_add_opt *addopt);
+
+/*
+void print_files(struct index *idx, struct index_result *result, 
+  unsigned int requested, unsigned int start, unsigned int maxwordlen,
+  int opts, struct index_search_opt *opt);
+
+void print_vocabulary(struct index *idx, struct index_result *result, 
+  unsigned int requested, unsigned int start, unsigned int maxwordlen,
+  int opts, struct index_search_opt *opt);
+
+
+void print_docmaps(struct index *idx, struct index_result *result, 
+  unsigned int requested, unsigned int start, unsigned int maxwordlen,
+  int opts, struct index_search_opt *opt);
+
+int print_index(struct index *idx, struct query *query,
+  struct poolalloc *list_alloc, unsigned int list_mem_limit,
+  struct search_metric_results *results,
+  int opts, struct index_search_opt *opt);
+*/
 
 #ifdef __cplusplus
 }

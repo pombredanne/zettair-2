@@ -26,6 +26,7 @@
 #include "heap.h"
 #include "_index.h"
 #include "index_querybuild.h"
+#include "index_prune.h"
 #include "docmap.h"
 #include "mlparse_wrap.h"
 #include "psettings.h"

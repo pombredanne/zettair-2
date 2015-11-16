@@ -32,7 +32,7 @@
 #include "_index.h"
 #include "_docmap.h"
 #include "index_querybuild.h"
-
+#include "index_prune.h"
 #include "def.h"
 #include "objalloc.h"
 #include "docmap.h"
